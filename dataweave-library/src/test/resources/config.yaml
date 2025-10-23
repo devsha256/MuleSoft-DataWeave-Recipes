@@ -1,0 +1,7 @@
+logging:
+  defaultEnv: "dev"
+  defaultLogEntry: true
+  defaultBusinessUnit: "global"
+  defaultSendEmail: false
+  defaultEmailTo: "dev-alerts@company.com"
+  defaultCreateTicket: false
