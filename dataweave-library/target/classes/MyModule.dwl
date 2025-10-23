@@ -3,6 +3,6 @@
 *
 * You can try it out with the mapping on the src/test/dw directory.
 */
-%dw 2.9
+%dw 2.0
 
 fun helloWorld() = { hello: "world" }
