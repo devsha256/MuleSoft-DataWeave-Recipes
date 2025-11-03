@@ -1,30 +1,34 @@
+%dw 2.0
+
 /**
- * QueryParamValidator - Builder Pattern Module for Sequential Query Parameter Validation
+ * QueryParamValidator Module - Builder Pattern for Sequential Query Parameter Validation
  * 
  * This module provides a fluent builder pattern API for validating query parameters
- * in a fail-fast manner. Validations are executed immediately in the order they are
- * chained, and execution stops at the first validation failure.
+ * in a fail-fast manner with support for dynamic error descriptions.
  * 
- * The module exposes a single entry point function `validate()` which returns a builder
- * object with chainable validation methods.
+ * Validations are executed immediately in the order they are chained, and execution 
+ * stops at the first validation failure.
  * 
  * === Key Features
  * 
  * - *Fail-fast validation*: Stops immediately at the first validation failure
  * - *Builder pattern*: Fluent API with method chaining using dot notation
  * - *Immediate execution*: Each validation executes as soon as it's called
+ * - *Dynamic error messages*: Template strings with variable injection using ${variable}
  * - *Custom transform functions*: Flexible lambda-based validation logic
- * - *Descriptive error messages*: Each validation provides a custom error description
  * 
  * === Dependencies
  * 
  * This module requires:
  * - DataWeave 2.0+
  * - dw::Runtime module (for fail() function)
+ * 
+ * @author Your Name
+ * @version 2.0.0
+ * @since 2025-11-04
  */
-%dw 2.0
 
-import fail from dw::Runtime
+import * from dw::Runtime
 
 /**
  * Initializes the query parameter validator with a builder pattern interface.
@@ -41,11 +45,7 @@ import fail from dw::Runtime
  * | `queryParams` | `Object` | The query parameters object to validate (typically from `attributes.queryParams`)
  * |===
  * 
- * === Example
- * 
- * This example validates five query parameters sequentially and fails fast if any validation fails.
- * 
- * ==== Source
+ * === Example - Basic Usage
  * 
  * [source,DataWeave,linenums]
  * ----
@@ -54,46 +54,12 @@ import fail from dw::Runtime
  * output application/json
  * ---
  * validate(attributes.queryParams)
- *     .withValidation("apiKey", "API Key is required", 
- *         (v) -> v != null and !isEmpty(v))
- *     .withValidation("apiKey", "API Key must be at least 20 characters", 
- *         (v) -> sizeOf(v) >= 20)
- *     .withValidation("userId", "User ID is required", 
- *         (v) -> v != null)
- *     .withValidation("userId", "User ID must be numeric", 
- *         (v) -> v matches /^[0-9]+$/)
- *     .withValidation("limit", "Limit must be between 1 and 100", 
- *         (v) -> v != null and (v as Number) >= 1 and (v as Number) <= 100)
+ *     .withValidation("apiKey", "API Key is required", (v) -> v != null and !isEmpty(v))
+ *     .withValidation("userId", "User ID must be numeric", (v) -> v matches /^[0-9]+$/)
  *     .getQueryParams()
  * ----
  * 
- * ==== Input
- * 
- * [source,JSON,linenums]
- * ----
- * {
- *   "apiKey": "valid-key-12345678901234567890",
- *   "userId": "12345",
- *   "limit": "50"
- * }
- * ----
- * 
- * ==== Output
- * 
- * [source,JSON,linenums]
- * ----
- * {
- *   "apiKey": "valid-key-12345678901234567890",
- *   "userId": "12345",
- *   "limit": "50"
- * }
- * ----
- * 
- * === Example
- * 
- * This example demonstrates fail-fast behavior when a validation fails.
- * 
- * ==== Source
+ * === Example - Dynamic Error Messages
  * 
  * [source,DataWeave,linenums]
  * ----
@@ -102,36 +68,157 @@ import fail from dw::Runtime
  * output application/json
  * ---
  * validate(attributes.queryParams)
- *     .withValidation("apiKey", "API Key is required", (v) -> v != null)
- *     .withValidation("userId", "User ID is required", (v) -> v != null)
- *     .withValidation("limit", "Limit is required", (v) -> v != null)
+ *     .withValidation("limit", "Limit must be between 1 and ${maxLimit}", 
+ *         (v) -> (v as Number) <= 100,
+ *         { maxLimit: 100 })
+ *     .withValidation("apiKey", "API Key '${apiKey}' is invalid format", 
+ *         (v) -> v matches /^[A-Z0-9]{20}$/,
+ *         { apiKey: attributes.queryParams.apiKey })
  *     .getQueryParams()
  * ----
  * 
- * ==== Input
+ * === Template Variables
  * 
- * [source,JSON,linenums]
- * ----
- * {
- *   "apiKey": "valid-key",
- *   "userId": null,
- *   "limit": "50"
- * }
- * ----
+ * Use `${variableName}` syntax in error descriptions to inject dynamic values.
+ * The last parameter (optional) accepts an Object with key-value pairs for variable substitution.
  * 
- * ==== Output
- * 
- * Throws exception with message: "User ID is required"
- * (The validation for "limit" is never executed due to fail-fast behavior)
+ * Common template variables:
+ * - `${fieldName}`: The name of the field being validated
+ * - `${fieldValue}`: The actual value of the field
+ * - `${maxLength}`: Maximum allowed length
+ * - `${minLength}`: Minimum allowed length
+ * - `${allowedValues}`: List of allowed values
  */
 fun validate(queryParams: Object) = {
-    withValidation: (field: String, description: String, transform: (value: Any) -> Boolean) -> do {
+    withValidation: (field: String, descriptionTemplate: String, transform: (value: Any) -> Boolean, variables: Object = {}) -> do {
         var fieldValue = queryParams[field]
+        var defaultVars = {
+            fieldName: field,
+            fieldValue: fieldValue,
+            fieldValueType: typeOf(fieldValue)
+        }
+        var allVariables = defaultVars ++ variables
+        var finalDescription = interpolateTemplate(descriptionTemplate, allVariables)
         ---
         if (transform(fieldValue))
             validate(queryParams)
         else
-            fail(description)
+            fail(finalDescription)
     },
     getQueryParams: () -> queryParams
 }
+
+/**
+ * Helper function to interpolate template strings with variables
+ * Replaces ${variableName} with corresponding values from the variables object
+ * 
+ * === Parameters
+ * 
+ * [%header, cols="1,1,3"]
+ * |===
+ * | Name | Type | Description
+ * | `template` | `String` | The template string containing ${variable} placeholders
+ * | `variables` | `Object` | Object containing variable names and their values
+ * |===
+ * 
+ * === Returns
+ * 
+ * Returns the interpolated string with all variables replaced
+ * 
+ * === Example
+ * 
+ * [source,DataWeave,linenums]
+ * ----
+ * interpolateTemplate("Field ${fieldName} with value ${fieldValue} is invalid", 
+ *     { fieldName: "email", fieldValue: "test@example.com" })
+ * // Returns: "Field email with value test@example.com is invalid"
+ * ----
+ */
+fun interpolateTemplate(template: String, variables: Object) = do {
+    var variableKeys = keysOf(variables)
+    ---
+    variableKeys reduce (key, result = template) ->
+        result replace /\$\{$(key)\}/ with (variables[key] as String)
+}
+
+/**
+ * Adds a validation rule to the validation chain and executes it immediately.
+ * 
+ * This function is exposed as a method on the builder object returned by `validate()`.
+ * It validates the specified field using the provided transform function and either
+ * continues the chain (if validation passes) or throws an error (if validation fails).
+ * 
+ * === Parameters
+ * 
+ * [%header, cols="1,1,3"]
+ * |===
+ * | Name | Type | Description
+ * | `field` | `String` | The name of the query parameter field to validate
+ * | `descriptionTemplate` | `String` | The error message template with optional ${variable} placeholders
+ * | `transform` | `(value: Any) -> Boolean` | A lambda function that receives the field value and returns `true` if valid, `false` otherwise
+ * | `variables` | `Object` (optional) | Object containing key-value pairs for template variable substitution
+ * |===
+ * 
+ * === Returns
+ * 
+ * Returns the same builder object to enable method chaining, or throws an exception
+ * if the validation fails.
+ * 
+ * === Example - Static Error Message
+ * 
+ * [source,DataWeave,linenums]
+ * ----
+ * validate(attributes.queryParams)
+ *     .withValidation("email", "Email is required", (v) -> v != null)
+ * ----
+ * 
+ * === Example - Dynamic Error Message with Field Value
+ * 
+ * [source,DataWeave,linenums]
+ * ----
+ * validate(attributes.queryParams)
+ *     .withValidation("apiKey", "Invalid API Key format: '${fieldValue}'", 
+ *         (v) -> v matches /^[A-Z0-9]{20}$/)
+ * ----
+ * 
+ * === Example - Dynamic Error Message with Custom Variables
+ * 
+ * [source,DataWeave,linenums]
+ * ----
+ * validate(attributes.queryParams)
+ *     .withValidation("limit", "Limit '${fieldValue}' exceeds maximum of ${maxLimit}", 
+ *         (v) -> (v as Number) <= 100,
+ *         { maxLimit: 100 })
+ * ----
+ */
+// Note: withValidation is defined inline within the validate() function
+// and is automatically available as a method on the returned builder object
+
+/**
+ * Returns the validated query parameters object.
+ * 
+ * This is the terminal function in the builder chain. It should be called after
+ * all validation rules have been added via `withValidation()`. If all validations
+ * passed, this function returns the original query parameters object.
+ * 
+ * === Returns
+ * 
+ * Returns the original query parameters object that was passed to `validate()`.
+ * 
+ * === Example
+ * 
+ * [source,DataWeave,linenums]
+ * ----
+ * %dw 2.0
+ * import * from QueryParamValidator
+ * output application/json
+ * ---
+ * {
+ *     validatedParams: validate(attributes.queryParams)
+ *         .withValidation("apiKey", "API Key is required", (v) -> v != null)
+ *         .getQueryParams()
+ * }
+ * ----
+ */
+// Note: getQueryParams is defined inline within the validate() function
+// and is automatically available as a method on the returned builder object
