@@ -30,7 +30,6 @@
  *   // With type hint (performance optimized)
  *   from(error)
  *     .ofType(RAMLErrorConstant)
- *     .withCorrelationId(vars.correlationId)
  *     .getMessage()
  * 
  * PERFORMANCE:
@@ -345,12 +344,10 @@ fun detectErrorType(err: Any): String =
  * 
  * @param errorPayload The error object to wrap
  * @param typeHint Optional type hint for performance ("Auto" by default)
- * @param correlationId Unique ID for distributed tracing (auto-generated)
  * @return Builder object with chainable methods
  * 
  * BUILDER METHODS (return new state):
  * - ofType(hint: String): Set error type hint
- * - withCorrelationId(id: String): Set correlation ID
  * 
  * TERMINAL METHODS (return final values):
  * - getMessage(): Extract error message
@@ -358,19 +355,17 @@ fun detectErrorType(err: Any): String =
  * - errorType(): Get error type identifier
  * 
  * @example
- *   var builder = createBuilderState(error, "Auto", uuid())
+ *   var builder = createBuilderState(error, "Auto")
  *   var message = builder.getMessage()
  */
 fun createBuilderState(
   errorPayload: Any,
-  typeHint: String = "Auto",
-  correlationId: String = uuid()
+  typeHint: String = "Auto"
 ): Object = {
   // Internal state (immutable)
   errorPayload: errorPayload,
   typeHint: typeHint,
-  correlationId: correlationId,
-  
+
   // ============================================
   // BUILDER METHODS (return new state for chaining)
   // ============================================
@@ -387,21 +382,7 @@ fun createBuilderState(
    * @example
    *   from(error).ofType(SAPErrorConstant)
    */
-  ofType: (hint: String) -> createBuilderState(errorPayload, hint, correlationId),
-  
-  /**
-   * Sets correlation ID for distributed tracing.
-   * 
-   * Use this to track errors across multiple systems and flows.
-   * Typically passed from upstream request or flow variable.
-   * 
-   * @param id Correlation ID (UUID or custom tracking ID)
-   * @return New builder state with correlation ID set
-   * 
-   * @example
-   *   from(error).withCorrelationId(vars.correlationId)
-   */
-  withCorrelationId: (id: String) -> createBuilderState(errorPayload, typeHint, id),
+  ofType: (hint: String) -> createBuilderState(errorPayload, hint),
   
   // ============================================
   // TERMINAL METHODS (return final values)
@@ -479,7 +460,7 @@ fun createBuilderState(
  *   from(error).ofType(RAMLErrorConstant).getMessage()
  */
 fun from(error: Any): Object = 
-  createBuilderState(error, "Auto", uuid())
+  createBuilderState(error, "Auto")
 
 // ============================================
 // STATIC CONVENIENCE METHODS
@@ -560,7 +541,6 @@ output application/json
 ---
 from(error)
   .ofType(RAMLErrorConstant)
-  .withCorrelationId(vars.correlationId)
   .getMessage()
 */
 
@@ -577,7 +557,6 @@ output application/json
 do {
   var handler = from(error)
     .ofType(SAPErrorConstant)
-    .withCorrelationId("abc-123")
   ---
   {
     message: handler.getMessage(),
@@ -624,13 +603,11 @@ do {
   
   var handler = from(error)
     .ofType(errorType)
-    .withCorrelationId(vars.correlationId)
   
   ---
   {
     statusCode: 500,
     error: {
-      correlationId: handler.correlationId,
       type: handler.errorType(),
       message: handler.getMessage()
     }
