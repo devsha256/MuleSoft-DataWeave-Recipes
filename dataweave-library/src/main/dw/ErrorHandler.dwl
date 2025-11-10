@@ -9,7 +9,10 @@
 // Type Definitions
 // ============================================
 
-type BaseErrorFields = {
+/**
+ * Base Mule Error structure - also used as fallback
+ */
+type MuleErrorMessage = {
   description: String,
   detailedDescription: String,
   errorType?: {
@@ -22,6 +25,9 @@ type BaseErrorFields = {
   }
 }
 
+/**
+ * RAML Error structure
+ */
 type RAMLErrorMessage = {
   error: {
     errorDescription: String,
@@ -30,6 +36,9 @@ type RAMLErrorMessage = {
   }
 }
 
+/**
+ * SAP Error structure
+ */
 type SAPErrorMessage = {
   errorMessage: {
     error: {
@@ -49,6 +58,9 @@ type SAPErrorMessage = {
   }
 }
 
+/**
+ * Salesforce Error structure
+ */
 type SFErrorMessage = {
   errorMessage: {
     error: {
@@ -59,17 +71,13 @@ type SFErrorMessage = {
   }
 }
 
-type GenericErrorMessage = {
-  errorMessage?: {
-    payload?: Any
-  }
-}
+// Composed Error Types
+type MuleError = MuleErrorMessage
+type RAMLError = MuleErrorMessage & RAMLErrorMessage
+type SAPError = MuleErrorMessage & SAPErrorMessage
+type SFError = MuleErrorMessage & SFErrorMessage
 
-type RAMLError = BaseErrorFields & RAMLErrorMessage
-type SAPError = BaseErrorFields & SAPErrorMessage
-type SFError = BaseErrorFields & SFErrorMessage
-type GatewayError = BaseErrorFields & GenericErrorMessage
-type ErrorPayload = RAMLError | SAPError | SFError | GatewayError | Any
+type ErrorPayload = RAMLError | SAPError | SFError | MuleError | Any
 
 // ============================================
 // Extraction Functions
@@ -85,7 +93,7 @@ fun extractMessage(err: Any): String =
     case e is RAMLError -> e.error.errorDescription
     case e is SAPError -> e.errorMessage.error.errorMessage.error.message.value
     case e is SFError -> (e.errorMessage.error.errorMessage default "Salesforce error")
-    case e is GatewayError -> (e.description default (e.errorMessage.payload as String default "Gateway error"))
+    case e is MuleError -> (e.description default (e.errorMessage.payload as String default "Mule error"))
     case e if (e.message?) -> e.message as String
     case e if (e.error?) -> e.error as String
     case e is String -> e
@@ -94,7 +102,6 @@ fun extractMessage(err: Any): String =
 
 /**
  * Extracts error message using type hint for performance.
- * Directly accesses the field based on known type.
  * @param err The error object
  * @param typeHint The known error type constant
  * @return Error message string
@@ -104,7 +111,7 @@ fun extractMessageByType(err: Any, typeHint: String): String =
     case "RAMLError" -> err.error.errorDescription
     case "SAPError" -> err.errorMessage.error.errorMessage.error.message.value
     case "SFError" -> (err.errorMessage.error.errorMessage default "Salesforce error")
-    case "GatewayError" -> (err.description default (err.errorMessage.payload as String default "Gateway error"))
+    case "MuleError" -> (err.description default (err.errorMessage.payload as String default "Mule error"))
     else -> extractMessage(err)
   }
 
