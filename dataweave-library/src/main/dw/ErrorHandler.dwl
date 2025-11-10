@@ -2,23 +2,13 @@
 
 /**
  * Error Handler Module
- * 
- * Supports pattern-based extraction of error message and payload from 
- * Mule error objects and plain payloads, using composable type definitions.
- * 
- * - Uses builder pattern with .ofType() and .withCorrelationId()
- * - Supports fromPayload(payload) and fromError(error)
- * - All error matching uses literal type definitions
+ * Composable types for Mule/direct payload error extraction.
  */
 
 // ============================================
 // Type Definitions
 // ============================================
 
-/**
- * @typedef BaseErrorFields
- * Basic structure for Mule error; reusable for composition.
- */
 type BaseErrorFields = {
   description: String,
   detailedDescription: String,
@@ -32,10 +22,6 @@ type BaseErrorFields = {
   }
 }
 
-/**
- * @typedef RAMLErrorMessage
- * Structure for common RAML error format.
- */
 type RAMLErrorMessage = {
   error: {
     errorDescription: String,
@@ -44,10 +30,6 @@ type RAMLErrorMessage = {
   }
 }
 
-/**
- * @typedef SAPErrorMessage
- * Structure for SAP error format.
- */
 type SAPErrorMessage = {
   errorMessage: {
     error: {
@@ -67,10 +49,6 @@ type SAPErrorMessage = {
   }
 }
 
-/**
- * @typedef SFErrorMessage
- * Structure for Salesforce Apex/API errors.
- */
 type SFErrorMessage = {
   errorMessage: {
     error: {
@@ -81,26 +59,16 @@ type SFErrorMessage = {
   }
 }
 
-/**
- * @typedef GenericErrorMessage
- * Structure for gateway/fallback errors.
- */
 type GenericErrorMessage = {
   errorMessage?: {
     payload?: Any
   }
 }
 
-// Composed Error Types
 type RAMLError = BaseErrorFields & RAMLErrorMessage
 type SAPError = BaseErrorFields & SAPErrorMessage
 type SFError = BaseErrorFields & SFErrorMessage
 type GatewayError = BaseErrorFields & GenericErrorMessage
-
-/**
- * @typedef ErrorPayload
- * Union type for all supported error types and fallback.
- */
 type ErrorPayload = RAMLError | SAPError | SFError | GatewayError | Any
 
 // ============================================
@@ -108,10 +76,9 @@ type ErrorPayload = RAMLError | SAPError | SFError | GatewayError | Any
 // ============================================
 
 /**
- * Extracts the error message from any error object using literal type pattern matching.
- * Only returns based on known type structures.
- * @param err Any error object
- * @return String error message
+ * Extracts error message from error payload using type pattern matching.
+ * @param err The error object
+ * @return Error message string
  */
 fun extractMessage(err: Any): String =
   err match {
@@ -126,38 +93,49 @@ fun extractMessage(err: Any): String =
   }
 
 /**
- * Creates a builder state for chained error extraction, given an error object.
- * Allows chaining .ofType(typeLiteral) and .withCorrelationId(id).
+ * Extracts error message using type hint for performance.
+ * Directly accesses the field based on known type.
+ * @param err The error object
+ * @param typeHint The known error type constant
+ * @return Error message string
+ */
+fun extractMessageByType(err: Any, typeHint: String): String =
+  typeHint match {
+    case "RAMLError" -> err.error.errorDescription
+    case "SAPError" -> err.errorMessage.error.errorMessage.error.message.value
+    case "SFError" -> (err.errorMessage.error.errorMessage default "Salesforce error")
+    case "GatewayError" -> (err.description default (err.errorMessage.payload as String default "Gateway error"))
+    else -> extractMessage(err)
+  }
+
+/**
+ * Creates builder state for chained error handling.
  */
 fun createBuilderState(
   errorPayload: Any,
-  typeHint: Any = null,
-  correlationId: String = null
+  typeHint: String = "Auto"
 ): Object = {
   errorPayload: errorPayload,
   typeHint: typeHint,
-  correlationId: correlationId,
-  ofType: (hint: Any) -> createBuilderState(errorPayload, hint, correlationId),
-  withCorrelationId: (id: String) -> createBuilderState(errorPayload, typeHint, id),
+  ofType: (hint: String) -> createBuilderState(errorPayload, hint),
   getMessage: () -> 
-    if (typeHint == null)
+    if (typeHint == "Auto")
       extractMessage(errorPayload)
     else
-      extractMessage(typeHint),
+      extractMessageByType(errorPayload, typeHint),
   raw: () -> errorPayload
 }
 
 /**
- * Entrypoint for extracting error details from a Mule error object.
- * @param error Mule error object as provided in MuleSoft flows
- * @return Builder state object with chainable API
+ * Entrypoint for Mule error objects.
+ * @param error Mule error object
+ * @return Builder state
  */
 fun fromError(error: Any): Object = createBuilderState(error)
 
 /**
- * Entrypoint for extracting error details from a direct payload (not Mule error).
- * Wraps payload as error.errorMessage for correct matching.
- * @param payload The error message payload
- * @return Builder state object with chainable API
+ * Entrypoint for direct payload (wraps as errorMessage).
+ * @param payload Error payload
+ * @return Builder state
  */
 fun fromPayload(payload: Any): Object = createBuilderState({ errorMessage: payload })
