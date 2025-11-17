@@ -1,0 +1,39 @@
+%dw 2.0
+output application/json
+
+// Define your new URL and path values
+var newBaseUrl = "https://new-api-host.com"
+var newPort = "8081"
+var newPathPrefix = "/api/v2"
+
+// Recursive function to update requests within items (handles both requests and folders)
+fun updateItems(items: Array) = 
+    items map (item) -> (
+        if (item.request?)
+            // This is a request item - update its URL
+            item update {
+                case .request.url at urlObj if (urlObj is Object) -> 
+                    urlObj update {
+                        case .raw -> newBaseUrl ++ ":" ++ newPort ++ newPathPrefix ++ "/" ++ (urlObj.path joinBy "/")
+                        case .protocol -> "https"
+                        case .host -> newBaseUrl replace "https://" with "" replace "http://" with ""
+                        case .port -> newPort
+                        case .path -> (newPathPrefix splitBy "/") ++ urlObj.path
+                    }
+                case .request.url at urlString if (urlString is String) -> 
+                    newBaseUrl ++ ":" ++ newPort ++ newPathPrefix
+            }
+        else if (item.item?)
+            // This is a folder - recursively update its nested items
+            item update {
+                case .item -> updateItems(item.item)
+            }
+        else
+            item
+    )
+
+---
+// Update the collection
+payload update {
+    case .item -> updateItems(payload.item)
+}
