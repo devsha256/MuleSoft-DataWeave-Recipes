@@ -2,25 +2,30 @@
 import * from dw::util::Values
 
 /**
- * Logger Builder - Updated with proper field handling
+ * Logger Builder - Enhanced with Java-style serialization for DB readability
  * Initializes errorMessage, shortDescription, description as empty strings
  * Uses update for these fields in asStart/asSuccess/asError
  */
 
+// Helper to resolve nested paths safely (e.g., "customer.name")
+var getNestedValue = (obj: Any, path: String) -> (
+    (path replace "'" with "") splitBy "." reduce (key, acc = obj) -> 
+        if (acc is Object) acc[key] else null
+)
+
 /**
- * Initialize builder - only sets config defaults
+ * Initialize builder - sets config defaults
  */
 fun newLogger(): Object = 
   buildLogger({
     reportingRequest: {
       loggingEntry: {
-        // DO NOT initialize mandatory fields - they'll be added by builder methods
-        // Only config defaults here
         env: p('logging.defaultEnv'),
         logEntry: p('logging.defaultLogEntry') as Boolean,
         businessUnit: p('logging.defaultBusinessUnit'),
         dateTimeStamp: now() as String { format: "MM/dd/yyyy" },
-        errorMessage: ""  // Initialize as empty string
+        errorMessage: "",
+        message: ""
       },
       email: {
         sendEmail: p('logging.defaultSendEmail') as Boolean,
@@ -28,8 +33,8 @@ fun newLogger(): Object =
       },
       serviceNow: {
         createSNowTicket: p('logging.defaultCreateTicket') as Boolean,
-        shortDescription: "",  // Initialize as empty string
-        description: ""        // Initialize as empty string
+        shortDescription: "",
+        description: ""
       }
     }
   })
@@ -39,7 +44,7 @@ fun newLogger(): Object =
  */
 fun buildLogger(loggerObj: Object) = {
   
-  // ===== MANDATORY FIELDS (use ++ to ADD, not update) =====
+  // ===== MANDATORY FIELDS =====
   
   withProcessId: (processId: String) -> 
     buildLogger(loggerObj update {
@@ -65,19 +70,47 @@ fun buildLogger(loggerObj: Object) = {
         loggingEntry ++ { apiName: apiName }
     }),
   
-  // ===== LOG TYPE METHODS =====
-  
+  // ===== NEW INTERMEDIATE CHAIN FUNCTIONS =====
+
   /**
-   * START: email=false, status=START, message="$(process) has started.", createTicket=false
-   * Updates errorMessage to empty, shortDescription to empty, description to empty
+   * Appends Query Params as a Java-serialized string to the message
    */
+  withQueryParams: (queryParams: Object) -> buildLogger(loggerObj update {
+    case entry at .reportingRequest.loggingEntry -> do {
+        var paramsStr = if (!isEmpty(queryParams)) write(queryParams, "application/java") else ""
+        ---
+        entry ++ { 
+            message: (entry.message default "") ++ (if (paramsStr != "") " | Params: " ++ paramsStr else "")
+        }
+    }
+  }),
+
+  /**
+   * Extracts fields from payload using a property string (e.g. "brand, 'user.id'")
+   * Flattens and serializes via application/java for DB readability
+   */
+  withPayloadFields: (payload: Any, fieldsInput: String) -> buildLogger(loggerObj update {
+    case entry at .reportingRequest.loggingEntry -> do {
+        var fieldList = (fieldsInput splitBy ",") map (trim($) replace "'" with "")
+        var flatObj = fieldList reduce (path, acc = {}) -> 
+            acc ++ { (path): getNestedValue(payload, path) }
+        var dataStr = write(flatObj, "application/java")
+        ---
+        entry ++ { 
+            message: (entry.message default "") ++ " | Data: " ++ dataStr
+        }
+    }
+  }),
+
+  // ===== LOG TYPE METHODS (Including Flag Overrides) =====
+  
   asStart: () -> 
     buildLogger(loggerObj update {
       case loggingEntry at .reportingRequest.loggingEntry -> 
         loggingEntry 
           ++ { 
             status: "START",
-            message: "$(loggingEntry.processName) has started."
+            message: "$(loggingEntry.processName) has started" ++ (loggingEntry.message default "")
           }
           update "errorMessage" with ""
       case email at .reportingRequest.email -> 
@@ -89,17 +122,13 @@ fun buildLogger(loggerObj: Object) = {
           update "description" with ""
     }),
   
-  /**
-   * SUCCESS: email=false, status=SUCCESS, message="$(process) has completed successfully!", createTicket=false
-   * Updates errorMessage to empty, shortDescription to empty, description to empty
-   */
   asSuccess: () -> 
     buildLogger(loggerObj update {
       case loggingEntry at .reportingRequest.loggingEntry -> 
         loggingEntry 
           ++ { 
             status: "SUCCESS",
-            message: "$(loggingEntry.processName) has completed successfully!"
+            message: "$(loggingEntry.processName) has completed successfully" ++ (loggingEntry.message default "")
           }
           update "errorMessage" with ""
       case email at .reportingRequest.email -> 
@@ -111,17 +140,13 @@ fun buildLogger(loggerObj: Object) = {
           update "description" with ""
     }),
   
-  /**
-   * ERROR: email=true, status=ERROR, message="$(process) has completed with error.", createTicket=true
-   * Updates errorMessage with error, shortDescription and description with error details
-   */
   asError: (errorMessage: String) -> 
     buildLogger(loggerObj update {
       case loggingEntry at .reportingRequest.loggingEntry -> 
         loggingEntry 
           ++ { 
             status: "ERROR",
-            message: "$(loggingEntry.processName) has completed with error."
+            message: "$(loggingEntry.processName) has completed with error" ++ (loggingEntry.message default "")
           }
           update "errorMessage" with errorMessage
       case email at .reportingRequest.email -> 
@@ -133,7 +158,7 @@ fun buildLogger(loggerObj: Object) = {
           update "description" with errorMessage
     }),
   
-  // ===== OPTIONAL FIELDS (use ++ to ADD) =====
+  // ===== OPTIONAL FIELDS =====
   
   withUserId: (userId: String) -> 
     buildLogger(loggerObj update {
@@ -165,7 +190,7 @@ fun buildLogger(loggerObj: Object) = {
         loggingEntry ++ { requestId: requestId }
     }),
   
-  // ===== OVERRIDE EMAIL (use update since these exist) =====
+  // ===== OVERRIDES =====
   
   withEmail: (emailTo: String) -> 
     buildLogger(loggerObj update {
@@ -178,8 +203,6 @@ fun buildLogger(loggerObj: Object) = {
       case email at .reportingRequest.email -> 
         email update "sendEmail" with false
     }),
-  
-  // ===== OVERRIDE TICKET (use update since these exist) =====
   
   withTicket: (shortDesc: String, description: String) -> 
     buildLogger(loggerObj update {
