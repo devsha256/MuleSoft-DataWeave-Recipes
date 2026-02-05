@@ -2,15 +2,20 @@
 import * from dw::util::Values
 
 /**
- * Logger Builder - Syntactically corrected and optimized for DB logging
+ * Logger Builder - Final Version
+ * Fixes: Parentheses syntax, dynamic field addition, and duplicate key prevention.
  */
 
-// Helper to resolve nested paths
+// Helper: Safely resolve nested paths
 var getNestedValue = (obj: Any, path: String) -> (
     (path replace "'" with "") splitBy "." reduce (key, acc = obj) -> 
         if (acc is Object) acc[key] else null
 )
 
+/**
+ * Initialize builder - sets config defaults
+ * Ensures 'message' is initialized so 'update' works later.
+ */
 fun newLogger(): Object = 
   buildLogger({
     reportingRequest: {
@@ -20,7 +25,7 @@ fun newLogger(): Object =
         businessUnit: p('logging.defaultBusinessUnit'),
         dateTimeStamp: now() as String { format: "MM/dd/yyyy" },
         errorMessage: "",
-        message: ""
+        message: "" // Initialized for intermediate updates
       },
       email: {
         sendEmail: p('logging.defaultSendEmail') as Boolean,
@@ -34,29 +39,44 @@ fun newLogger(): Object =
     }
   })
 
+/**
+ * Builder function with all chainable methods
+ */
 fun buildLogger(loggerObj: Object) = {
   
-  withProcessId: (processId: String) -> buildLogger(loggerObj update {
-      case loggingEntry at .reportingRequest.loggingEntry -> loggingEntry ++ { processId: processId }
-  }),
+  // ===== MANDATORY FIELDS (use ++ to ensure addition if missing) =====
   
-  withProcessName: (processName: String) -> buildLogger(loggerObj update {
-      case loggingEntry at .reportingRequest.loggingEntry -> loggingEntry ++ { processName: processName }
-  }),
+  withProcessId: (processId: String) -> 
+    buildLogger(loggerObj update {
+      case loggingEntry at .reportingRequest.loggingEntry -> 
+        loggingEntry ++ { processId: processId }
+    }),
   
-  withCorrelationId: (correlationId: String) -> buildLogger(loggerObj update {
-      case loggingEntry at .reportingRequest.loggingEntry -> loggingEntry ++ { correlationId: correlationId }
-  }),
+  withProcessName: (processName: String) -> 
+    buildLogger(loggerObj update {
+      case loggingEntry at .reportingRequest.loggingEntry -> 
+        loggingEntry ++ { processName: processName }
+    }),
   
-  withApiName: (apiName: String) -> buildLogger(loggerObj update {
-      case loggingEntry at .reportingRequest.loggingEntry -> loggingEntry ++ { apiName: apiName }
-  }),
+  withCorrelationId: (correlationId: String) -> 
+    buildLogger(loggerObj update {
+      case loggingEntry at .reportingRequest.loggingEntry -> 
+        loggingEntry ++ { correlationId: correlationId }
+    }),
   
+  withApiName: (apiName: String) -> 
+    buildLogger(loggerObj update {
+      case loggingEntry at .reportingRequest.loggingEntry -> 
+        loggingEntry ++ { apiName: apiName }
+    }),
+  
+  // ===== INTERMEDIATE CONTEXT =====
+
   withQueryParams: (queryParams: Object) -> buildLogger(loggerObj update {
     case m at .reportingRequest.loggingEntry.message -> do {
         var paramsStr = if (!isEmpty(queryParams)) write(queryParams, "application/java") else ""
         ---
-        if (paramsStr != "") m ++ " | Params: " ++ paramsStr else m
+        if (paramsStr != "") (m ++ " | Params: " ++ paramsStr) else m
     }
   }),
 
@@ -67,88 +87,120 @@ fun buildLogger(loggerObj: Object) = {
             acc ++ { (path): getNestedValue(payload, path) }
         var dataStr = write(flatObj, "application/java")
         ---
-        m ++ " | Data: " ++ dataStr
+        (m ++ " | Data: " ++ dataStr)
     }
   }),
 
-  asStart: () -> buildLogger(loggerObj update {
+  // ===== LOG TYPE METHODS (Using ++ for addition, update for existing) =====
+  
+  asStart: () -> 
+    buildLogger(loggerObj update {
       case loggingEntry at .reportingRequest.loggingEntry -> 
-        loggingEntry 
-          update "status" with "START"
-          update "message" with "$(loggingEntry.processName) has started" ++ (loggingEntry.message default "")
+        (loggingEntry ++ { status: "START" })
+          update "message" with ("$(loggingEntry.processName) has started" ++ (loggingEntry.message default ""))
           update "errorMessage" with ""
-      case email at .reportingRequest.email -> email update "sendEmail" with false
+      case email at .reportingRequest.email -> 
+        email update "sendEmail" with false
       case serviceNow at .reportingRequest.serviceNow -> 
         serviceNow 
           update "createSNowTicket" with false
           update "shortDescription" with ""
           update "description" with ""
-  }),
+    }),
   
-  asSuccess: () -> buildLogger(loggerObj update {
+  asSuccess: () -> 
+    buildLogger(loggerObj update {
       case loggingEntry at .reportingRequest.loggingEntry -> 
-        loggingEntry 
-          update "status" with "SUCCESS"
-          update "message" with "$(loggingEntry.processName) has completed successfully" ++ (loggingEntry.message default "")
+        (loggingEntry ++ { status: "SUCCESS" })
+          update "message" with ("$(loggingEntry.processName) has completed successfully" ++ (loggingEntry.message default ""))
           update "errorMessage" with ""
-      case email at .reportingRequest.email -> email update "sendEmail" with false
+      case email at .reportingRequest.email -> 
+        email update "sendEmail" with false
       case serviceNow at .reportingRequest.serviceNow -> 
         serviceNow 
           update "createSNowTicket" with false
           update "shortDescription" with ""
           update "description" with ""
-  }),
+    }),
   
-  asError: (errorMessage: String) -> buildLogger(loggerObj update {
+  asError: (errorMessage: String) -> 
+    buildLogger(loggerObj update {
       case loggingEntry at .reportingRequest.loggingEntry -> 
-        loggingEntry 
-          update "status" with "ERROR"
-          update "message" with "$(loggingEntry.processName) has completed with error" ++ (loggingEntry.message default "")
+        (loggingEntry ++ { status: "ERROR" })
+          update "message" with ("$(loggingEntry.processName) has completed with error" ++ (loggingEntry.message default ""))
           update "errorMessage" with errorMessage
-      case email at .reportingRequest.email -> email update "sendEmail" with true
+      case email at .reportingRequest.email -> 
+        email update "sendEmail" with true
       case serviceNow at .reportingRequest.serviceNow -> 
         serviceNow 
           update "createSNowTicket" with true
-          update "shortDescription" with "Error in $(loggerObj.reportingRequest.loggingEntry.apiName)"
+          update "shortDescription" with ("Error in " ++ (loggerObj.reportingRequest.loggingEntry.apiName default "API"))
           update "description" with errorMessage
-  }),
+    }),
   
-  withUserId: (userId: String) -> buildLogger(loggerObj update {
-      case loggingEntry at .reportingRequest.loggingEntry -> loggingEntry ++ { userId: userId }
-  }),
+  // ===== OPTIONAL FIELDS =====
   
-  withPayload: (payload: Any) -> buildLogger(loggerObj update {
-      case loggingEntry at .reportingRequest.loggingEntry -> loggingEntry ++ { payload: write(payload, "application/json") }
-  }),
+  withUserId: (userId: String) -> 
+    buildLogger(loggerObj update {
+      case loggingEntry at .reportingRequest.loggingEntry -> 
+        loggingEntry ++ { userId: userId }
+    }),
   
-  withStackTrace: (stackTrace: String) -> buildLogger(loggerObj update {
-      case loggingEntry at .reportingRequest.loggingEntry -> loggingEntry ++ { stackTrace: stackTrace }
-  }),
+  withPayload: (payload: Any) -> 
+    buildLogger(loggerObj update {
+      case loggingEntry at .reportingRequest.loggingEntry -> 
+        loggingEntry ++ { payload: write(payload, "application/json") }
+    }),
   
-  withErrorDetails: (details: String) -> buildLogger(loggerObj update {
-      case loggingEntry at .reportingRequest.loggingEntry -> loggingEntry ++ { errorDetails: details }
-  }),
+  withStackTrace: (stackTrace: String) -> 
+    buildLogger(loggerObj update {
+      case loggingEntry at .reportingRequest.loggingEntry -> 
+        loggingEntry ++ { stackTrace: stackTrace }
+    }),
   
-  withRequestId: (requestId: String) -> buildLogger(loggerObj update {
-      case loggingEntry at .reportingRequest.loggingEntry -> loggingEntry ++ { requestId: requestId }
-  }),
+  withErrorDetails: (details: String) -> 
+    buildLogger(loggerObj update {
+      case loggingEntry at .reportingRequest.loggingEntry -> 
+        loggingEntry ++ { errorDetails: details }
+    }),
   
-  withEmail: (emailTo: String) -> buildLogger(loggerObj update {
-      case email at .reportingRequest.email -> email update "emailTo" with emailTo update "sendEmail" with true
-  }),
+  withRequestId: (requestId: String) -> 
+    buildLogger(loggerObj update {
+      case loggingEntry at .reportingRequest.loggingEntry -> 
+        loggingEntry ++ { requestId: requestId }
+    }),
   
-  withoutEmail: () -> buildLogger(loggerObj update {
-      case email at .reportingRequest.email -> email update "sendEmail" with false
-  }),
+  // ===== OVERRIDES =====
   
-  withTicket: (shortDesc: String, description: String) -> buildLogger(loggerObj update {
+  withEmail: (emailTo: String) -> 
+    buildLogger(loggerObj update {
+      case email at .reportingRequest.email -> 
+        email update "emailTo" with emailTo update "sendEmail" with true
+    }),
+  
+  withoutEmail: () -> 
+    buildLogger(loggerObj update {
+      case email at .reportingRequest.email -> 
+        email update "sendEmail" with false
+    }),
+  
+  withTicket: (shortDesc: String, description: String) -> 
+    buildLogger(loggerObj update {
       case serviceNow at .reportingRequest.serviceNow -> 
-        serviceNow update "createSNowTicket" with true update "shortDescription" with shortDesc update "description" with description
-  }),
+        serviceNow 
+          update "createSNowTicket" with true
+          update "shortDescription" with shortDesc
+          update "description" with description
+    }),
   
-  withoutTicket: () -> buildLogger(loggerObj update {
-      case serviceNow at .reportingRequest.serviceNow -> serviceNow update "createSNowTicket" with false
-  }),
+  withoutTicket: () -> 
+    buildLogger(loggerObj update {
+      case serviceNow at .reportingRequest.serviceNow -> 
+        serviceNow update "createSNowTicket" with false
+    }),
   
-  build: () -> loggerObj.reportingRequest filterObject (value, key) -> !isEmpty(value)
+  // ===== TERMINAL METHOD =====
+  
+  build: () -> 
+    loggerObj.reportingRequest filterObject (value, key) -> !isEmpty(value)
 }
